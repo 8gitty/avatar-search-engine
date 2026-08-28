@@ -1,9 +1,9 @@
 # Use Debian-based Node image
-FROM node:18-bullseye
+FROM node:20-bullseye
 
 # Install Tor
-RUN apt-get update && apt-get install -y tor
-
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs
 # Set working directory
 WORKDIR /app
 
