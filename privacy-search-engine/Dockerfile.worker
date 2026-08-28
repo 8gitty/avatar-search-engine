@@ -1,0 +1,18 @@
+# Use Debian-based Node image
+FROM node:18-bullseye
+
+# Install Tor
+RUN apt-get update && apt-get install -y tor
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy worker code
+COPY spiderWorker.js .
+
+# Start Tor in the background, wait 5 seconds for circuits to build, then start the Node worker
+CMD service tor start && sleep 5 && node spiderWorker.js
