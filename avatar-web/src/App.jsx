@@ -10,7 +10,7 @@ function App() {
   const [results, setResults] = useState([]);
   const [mediaResults, setMediaResults] = useState([]); 
   const [aiSummary, setAiSummary] = useState(null);
-  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
