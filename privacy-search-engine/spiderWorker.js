@@ -87,3 +87,8 @@ const worker = new Worker('search-queue', async (job) => {
 worker.on('failed', (job, err) => {
     console.error(`[Spider Worker] Job ${job.id} failed:`, err.message);
 });
+// Fake health check so Render's Free Web Service doesn't kill the container
+const express = require('express');
+const dummyApp = express();
+dummyApp.get('/', (req, res) => res.send('Spider Swarm Active'));
+dummyApp.listen(process.env.PORT || 10000, () => console.log('Dummy port bound.'));
