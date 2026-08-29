@@ -24,7 +24,8 @@ const VaultSchema = new mongoose.Schema({
 const Vault = mongoose.model('Vault', VaultSchema);
 
 // --- ROUTE 1: AVATAR AGGREGATOR & AI ENGINE ---
-const connection = { url: 'redis://red-da8r09rtqb8s73f1fp7g:6379' }; // Use the actual stringconst searchQueue = new Queue('search-queue', { connection });
+const connection = { url: 'redis://red-da8r09rtqb8s73f1fp7g:6379' }; 
+const searchQueue = new Queue('search-queue', { connection });
 const queueEvents = new QueueEvents('search-queue', { connection });
 
 app.get('/search', async (req, res) => {
