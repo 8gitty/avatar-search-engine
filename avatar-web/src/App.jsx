@@ -10,7 +10,7 @@ function App() {
   const [results, setResults] = useState([]);
   const [mediaResults, setMediaResults] = useState([]); 
   const [aiSummary, setAiSummary] = useState(null);
-const API_BASE_URL = 'https://avatar-search-engine-YOUR-ID.onrender.com';  
+const API_BASE_URL = 'https://avatar-search-engine-x7y9.onrender.com';  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
