@@ -52,8 +52,7 @@ function App() {
     
     if (value.trim().length > 1) {
       try {
-        const response = await axios.get(`http://localhost:3000/autocomplete`, { params: { q: value } });
-        setSuggestions(response.data || []);
+const response = await axios.get(`${API_BASE_URL}/autocomplete`, { params: { q: value } });        setSuggestions(response.data || []);
         setShowSuggestions(true);
       } catch (err) {
         setSuggestions([]);
@@ -93,8 +92,7 @@ function App() {
     setVaultKey(key);
 
     try {
-      const res = await axios.get(`http://localhost:3000/vault/fetch?userId=${userId}`);
-      if (res.data.encryptedData) {
+const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);      if (res.data.encryptedData) {
         const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
         const decryptedData = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
         setBookmarks(decryptedData);
@@ -123,7 +121,7 @@ function App() {
 
     try {
       const cipherText = CryptoJS.AES.encrypt(JSON.stringify(updatedBookmarks), vaultKey).toString();
-      await axios.post('http://localhost:3000/vault/sync', { userId, encryptedData: cipherText });
+      await axios.post(`${API_BASE_URL}/vault/sync`, { userId, encryptedData: cipherText });
     } catch (e) {
       console.error("Vault sync failed", e);
     }
