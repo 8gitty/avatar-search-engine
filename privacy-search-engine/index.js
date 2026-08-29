@@ -78,20 +78,20 @@ app.get('/search', async (req, res) => {
 });
 
 // --- ROUTE 2: DEEP MEDIA SCRAPER ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER ---
 app.get('/media', async (req, res) => {
     const { q: query, type, vqd: clientVqd } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        const agent = new SocksProxyAgent('socks5h://127.0.0.1:9050');
         let vqd = clientVqd;
 
         if (!vqd || vqd === 'undefined') {
             try {
+                // Agent removed: connecting directly via Render's network
                 const tokenRes = await axios.get('https://duckduckgo.com/', { 
                     params: { q: query, t: 'h_' }, 
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                    httpsAgent: agent, httpAgent: agent 
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                 });
                 const vqdMatch = tokenRes.data.match(/vqd=["']([^"']+)["']/);
                 if (vqdMatch) vqd = vqdMatch[1];
@@ -102,8 +102,7 @@ app.get('/media', async (req, res) => {
             if (!vqd) {
                 const htmlRes = await axios.get('https://html.duckduckgo.com/html/', { 
                     params: { q: query }, 
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                    httpsAgent: agent, httpAgent: agent 
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                 });
                 const $ = cheerio.load(htmlRes.data);
                 vqd = $('input[name="vqd"]').val();
@@ -117,13 +116,13 @@ app.get('/media', async (req, res) => {
             params: { l: 'us-en', o: 'json', q: query, vqd: vqd, f: ',,,', p: '1' },
             headers: { 
                 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://duckduckgo.com/'
-            },
-            httpsAgent: agent, httpAgent: agent
+            }
         });
 
         res.json({ results: mediaRes.data.results });
     } catch (error) {
-        res.status(500).json({ error: 'Media proxy blocked.' });
+        console.error("[Media Error]:", error.message);
+        res.status(500).json({ error: 'Media extraction failed.' });
     }
 });
 
