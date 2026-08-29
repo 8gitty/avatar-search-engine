@@ -10,11 +10,14 @@ function App() {
   const [results, setResults] = useState([]);
   const [mediaResults, setMediaResults] = useState([]); 
   const [aiSummary, setAiSummary] = useState(null);
-const API_BASE_URL = 'https://avatar-search-engine-x7y9.onrender.com';  
+  
+  // Directly hardcoded to your exact Render URL
+  const API_BASE_URL = 'https://avatar-search-engine.onrender.com';  
+  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(5); // Controls the "Load More" limit
+  const [visibleCount, setVisibleCount] = useState(5);
 
   // --- AUTOCOMPLETE STATE ---
   const [suggestions, setSuggestions] = useState([]);
@@ -51,7 +54,8 @@ const API_BASE_URL = 'https://avatar-search-engine-x7y9.onrender.com';
     
     if (value.trim().length > 1) {
       try {
-const response = await axios.get(`${API_BASE_URL}/autocomplete`, { params: { q: value } });        setSuggestions(response.data || []);
+        const response = await axios.get(`${API_BASE_URL}/autocomplete`, { params: { q: value } });
+        setSuggestions(response.data || []);
         setShowSuggestions(true);
       } catch (err) {
         setSuggestions([]);
@@ -91,7 +95,8 @@ const response = await axios.get(`${API_BASE_URL}/autocomplete`, { params: { q: 
     setVaultKey(key);
 
     try {
-const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);      if (res.data.encryptedData) {
+      const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);
+      if (res.data.encryptedData) {
         const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
         const decryptedData = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
         setBookmarks(decryptedData);
@@ -138,14 +143,16 @@ const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);    
     setResults([]);
     setMediaResults([]);
     setAiSummary(null);
-    setVisibleCount(5); // Reset pagination on new search
+    setVisibleCount(5); 
     
     try {
       if (currentType === 'web') {
-const res = await axios.get(`${API_BASE_URL}/search`, { params: { q: searchQuery } });        setResults(res.data.results || []);
+        const res = await axios.get(`${API_BASE_URL}/search`, { params: { q: searchQuery } });
+        setResults(res.data.results || []);
         setAiSummary(res.data.aiSummary || null);
       } else {
-const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery, type: currentType } });        setMediaResults(res.data.results || []);
+        const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery, type: currentType } });
+        setMediaResults(res.data.results || []);
       }
     } catch (err) {
       console.error(err);
@@ -240,7 +247,7 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
         {aiSummary && (
             <div className="ai-summary mb-10 p-5 rounded-xl border border-blue-500/30 bg-blue-50/50 shadow-sm" style={{ marginBottom: '2rem', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid rgba(59, 130, 246, 0.3)', backgroundColor: 'rgba(239, 246, 255, 0.5)' }}>
                 <h4 className="text-xs font-bold text-blue-600 mb-3 tracking-widest uppercase flex items-center gap-2" style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#2563eb', marginBottom: '0.75rem', letterSpacing: '0.1em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    🛡️ Avatar AI Synthesized Result
+                  🛡️ Avatar AI Synthesized Result
                 </h4>
                 <p className="text-gray-800 text-sm leading-relaxed" style={{ color: '#1f2937', fontSize: '0.875rem', lineHeight: '1.625' }}>{aiSummary}</p>
             </div>
@@ -251,11 +258,9 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '2rem' }}>
             {results.slice(0, visibleCount).map((item, index) => {
               
-              // Resolve URL logic between legacy schemas and new spider swarm
               let cleanUrl = item.URL || item.FirstURL;
               if (!cleanUrl) return null; 
               
-              // URL Decoding
               if (cleanUrl.includes('uddg=')) {
                 try {
                   cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
@@ -264,7 +269,6 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
 
               const title = item.Title || item.Text.split(' - ')[0];
 
-              // Strict Ad Firewall
               if (
                 cleanUrl.includes('y.js') || 
                 cleanUrl.includes('ad_domain') || 
@@ -278,10 +282,8 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
               return (
                 <div key={index} style={{ paddingBottom: '1.5rem', borderBottom: '1px solid #eaeaea' }}>
                   
-                  {/* Header: Domain Tag, URL, and Bookmark */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      {/* Dynamically extract the clean domain name instead of showing the scraper source */}
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', backgroundColor: '#f1f3f4', padding: '2px 8px', borderRadius: '12px', color: '#5f6368' }}>
                         {(() => {
                           try {
@@ -305,13 +307,11 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
                     </button>
                   </div>
                   
-                  {/* Clickable Title */}
                   <a href={cleanUrl} target="_blank" rel="noopener noreferrer" 
                      style={{ fontSize: '20px', color: '#1a0dab', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
                     {title}
                   </a>
                   
-                  {/* Snippet Context */}
                   <p style={{ fontSize: '14px', color: '#4d5156', lineHeight: '1.58', margin: 0, maxWidth: '800px' }}>
                     {item.Text}
                   </p>
@@ -319,7 +319,6 @@ const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery,
               );
             })}
 
-            {/* --- LOAD MORE BUTTON --- */}
             {results.length > visibleCount && (
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem', paddingBottom: '4rem' }}>
                 <button 
