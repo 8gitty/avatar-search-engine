@@ -10,8 +10,7 @@ function App() {
   const [results, setResults] = useState([]);
   const [mediaResults, setMediaResults] = useState([]); 
   const [aiSummary, setAiSummary] = useState(null);
-  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-  
+const API_BASE_URL = 'https://avatar-search-engine-YOUR-ID.onrender.com';  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -143,12 +142,10 @@ const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);    
     
     try {
       if (currentType === 'web') {
-        const res = await axios.get(`http://localhost:3000/search`, { params: { q: searchQuery } });
-        setResults(res.data.results || []);
+const res = await axios.get(`${API_BASE_URL}/search`, { params: { q: searchQuery } });        setResults(res.data.results || []);
         setAiSummary(res.data.aiSummary || null);
       } else {
-        const res = await axios.get(`http://localhost:3000/media`, { params: { q: searchQuery, type: currentType } });
-        setMediaResults(res.data.results || []);
+const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery, type: currentType } });        setMediaResults(res.data.results || []);
       }
     } catch (err) {
       console.error(err);
