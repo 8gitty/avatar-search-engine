@@ -37,8 +37,7 @@ app.get('/search', async (req, res) => {
         const job = await searchQueue.add('scrape-job', { query: q });
 
         // 2. Wait for worker process to complete the job
-        const unifiedResults = await job.waitUntilFinished(queueEvents, 7000);
-
+const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
         // 3. Pass results to local hardware-accelerated LLM (Llama 3.2 3B)
         let aiSummary = null;
         if (unifiedResults && unifiedResults.length > 0) {
