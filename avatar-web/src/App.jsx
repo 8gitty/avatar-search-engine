@@ -90,22 +90,43 @@ function App() {
 
   // --- VAULT LOGIC ---
   const unlockVault = async () => {
-    const key = prompt("Enter your AES-256 Vault Password. If you lose this, your data is gone forever:");
+    const key = prompt("Enter your AES-256 Vault Password:");
     if (!key) return;
-    setVaultKey(key);
 
     try {
+      // 1. Fetch the encrypted string from MongoDB
       const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);
-      if (res.data.encryptedData) {
-        const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
-        const decryptedData = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-        setBookmarks(decryptedData);
+      
+      if (res.data && res.data.encryptedData) {
+        try {
+          // 2. Attempt to decrypt the existing data
+          const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
+          const decryptedText = bytes.toString(CryptoJS.enc.Utf8);
+          
+          if (!decryptedText) throw new Error("Decryption resulted in empty string");
+          
+          const decryptedData = JSON.parse(decryptedText);
+          setBookmarks(decryptedData);
+          setVaultKey(key);
+        } catch (err) {
+          // 3. If decryption fails, offer a factory reset instead of locking the user out
+          const wipe = window.confirm("Invalid key or corrupted data! Do you want to permanently wipe this vault and start fresh with your new key?");
+          if (wipe) {
+            setVaultKey(key);
+            setBookmarks([]);
+            const cipherText = CryptoJS.AES.encrypt(JSON.stringify([]), key).toString();
+            await axios.post(`${API_BASE_URL}/vault/sync`, { userId, encryptedData: cipherText });
+            alert("Vault has been successfully factory reset!");
+          }
+        }
       } else {
+        // 4. No data exists yet
+        setVaultKey(key);
         alert("Vault initialized! You can now save encrypted bookmarks.");
       }
-    } catch (e) {
-      alert("Invalid decryption key or corrupted vault.");
-      setVaultKey('');
+    } catch (networkErr) {
+      // 5. Catch actual server/database crashes
+      alert("Network error: Cannot reach the MongoDB database. Check your backend logs.");
     }
   };
 
