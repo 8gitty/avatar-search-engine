@@ -76,44 +76,28 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (DuckDuckGo Engine) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Dependency-Free DDG Engine) ---
 app.get('/media', async (req, res) => {
-    const { q: query, type, vqd: clientVqd } = req.query; 
+    const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        let vqd = clientVqd;
+        // 1. Silently fetch the DuckDuckGo VQD token using only Axios
+        const tokenRes = await axios.get('https://duckduckgo.com/', { 
+            params: { q: query, t: 'h_' }, 
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
+        });
+        
+        // 2. Extract token with standard Regex (No extra libraries needed)
+        const vqdMatch = tokenRes.data.match(/vqd=["']?([^"'>\s]+)["']?/);
+        const vqd = vqdMatch ? vqdMatch[1] : null;
 
-        // Extract VQD Token if not passed from frontend
-        if (!vqd || vqd === 'undefined') {
-            try {
-                const tokenRes = await axios.get('https://duckduckgo.com/', { 
-                    params: { q: query, t: 'h_' }, 
-                    headers: { 
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-                    }
-                });
-                const vqdMatch = tokenRes.data.match(/vqd=["']([^"']+)["']/);
-                if (vqdMatch) vqd = vqdMatch[1];
-            } catch (e) {
-                console.log("[Media] Primary token fetch failed, trying HTML fallback...");
-            }
-
-            if (!vqd) {
-                const htmlRes = await axios.get('https://html.duckduckgo.com/html/', { 
-                    params: { q: query }, 
-                    headers: { 
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
-                    }
-                });
-                const $ = cheerio.load(htmlRes.data);
-                vqd = $('input[name="vqd"]').val();
-            }
+        if (!vqd) {
+            console.log("[Media] DDG Token blocked.");
+            return res.json({ results: [] }); // Fails gracefully instead of crashing
         }
 
-        if (!vqd) throw new Error("VQD Token extraction failed");
-
-        // Fetch from DuckDuckGo internal JSON endpoints
+        // 3. Fetch the actual media using the generated token
         const endpoint = type === 'videos' ? 'https://duckduckgo.com/v.js' : 'https://duckduckgo.com/i.js';
         const mediaRes = await axios.get(endpoint, {
             params: { l: 'us-en', o: 'json', q: query, vqd: vqd, f: ',,,', p: '1' },
@@ -124,13 +108,14 @@ app.get('/media', async (req, res) => {
             }
         });
 
+        // Send the exact layout format your React frontend expects
         res.json({ results: mediaRes.data.results || [] });
     } catch (error) {
         console.error("[Media Error]:", error.message);
-        res.status(500).json({ error: 'Media extraction failed.' });
+        // If DDG times out, return an empty array instead of throwing a 500 Network Error
+        res.json({ results: [] }); 
     }
 });
-
 
 // --- ROUTE 3: ZERO-KNOWLEDGE VAULT ---
 app.post('/vault/sync', async (req, res) => {
