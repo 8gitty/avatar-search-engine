@@ -76,59 +76,57 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (Open Data Architecture) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (DuckDuckGo Engine) ---
 app.get('/media', async (req, res) => {
-    const { q: query, type } = req.query; 
+    const { q: query, type, vqd: clientVqd } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        let formattedResults = [];
+        let vqd = clientVqd;
 
-        if (type === 'videos') {
-            // Open Video API (Dailymotion - no API key required, datacenter safe)
-            const response = await axios.get('https://api.dailymotion.com/videos', {
-                params: { search: query, limit: 20, fields: 'title,thumbnail_360_url,url' }
-            });
-            
-            formattedResults = (response.data.list || []).map(item => ({
-                image: item.thumbnail_360_url || '',
-                title: item.title || '',
-                url: `https://www.dailymotion.com/video/${item.id}` || item.url || '',
-                thumbnail: item.thumbnail_360_url || ''
-            }));
-        } else {
-            // Open Image API (Wikimedia Commons - tracker-free, zero IP blocks)
-            const response = await axios.get(`https://commons.wikimedia.org/w/api.php`, {
-                params: {
-                    action: 'query',
-                    generator: 'search',
-                    gsrsearch: query,
-                    gsrnamespace: 6, // Restrict to File namespace
-                    gsrlimit: 24,
-                    prop: 'imageinfo',
-                    iiprop: 'url',
-                    format: 'json'
-                },
-                headers: { 'User-Agent': 'AvatarPrivacyEngine/1.0' }
-            });
+        // Extract VQD Token if not passed from frontend
+        if (!vqd || vqd === 'undefined') {
+            try {
+                const tokenRes = await axios.get('https://duckduckgo.com/', { 
+                    params: { q: query, t: 'h_' }, 
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+                    }
+                });
+                const vqdMatch = tokenRes.data.match(/vqd=["']([^"']+)["']/);
+                if (vqdMatch) vqd = vqdMatch[1];
+            } catch (e) {
+                console.log("[Media] Primary token fetch failed, trying HTML fallback...");
+            }
 
-            const pages = response.data.query?.pages;
-            if (pages) {
-                formattedResults = Object.values(pages).map(page => {
-                    const info = page.imageinfo && page.imageinfo[0];
-                    return {
-                        image: info?.url || '',
-                        title: page.title.replace('File:', '').replace(/\.[^/.]+$/, "") || '',
-                        url: info?.descriptionurl || info?.url || '',
-                        thumbnail: info?.url || ''
-                    };
-                }).filter(item => item.image); // Filter out any empty results
+            if (!vqd) {
+                const htmlRes = await axios.get('https://html.duckduckgo.com/html/', { 
+                    params: { q: query }, 
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' 
+                    }
+                });
+                const $ = cheerio.load(htmlRes.data);
+                vqd = $('input[name="vqd"]').val();
             }
         }
 
-        res.json({ results: formattedResults });
+        if (!vqd) throw new Error("VQD Token extraction failed");
+
+        // Fetch from DuckDuckGo internal JSON endpoints
+        const endpoint = type === 'videos' ? 'https://duckduckgo.com/v.js' : 'https://duckduckgo.com/i.js';
+        const mediaRes = await axios.get(endpoint, {
+            params: { l: 'us-en', o: 'json', q: query, vqd: vqd, f: ',,,', p: '1' },
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'application/json',
+                'Referer': 'https://duckduckgo.com/'
+            }
+        });
+
+        res.json({ results: mediaRes.data.results || [] });
     } catch (error) {
-        console.error("[Media API Error]:", error.message);
+        console.error("[Media Error]:", error.message);
         res.status(500).json({ error: 'Media extraction failed.' });
     }
 });
