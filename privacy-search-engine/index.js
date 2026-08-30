@@ -77,7 +77,6 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
 });
 
 // --- ROUTE 2: DEEP MEDIA SCRAPER ---
-// --- ROUTE 2: DEEP MEDIA SCRAPER ---
 app.get('/media', async (req, res) => {
     const { q: query, type, vqd: clientVqd } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -146,13 +145,15 @@ app.listen(PORT, () => {
 // --- ROUTE 4: AUTOCOMPLETE API ---
 app.get('/autocomplete', async (req, res) => {
     try {
-        const response = await axios.get(`https://duckduckgo.com/ac/`, {
-            params: { q: req.query.q, type: 'list' },
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json'
+        // Swapped to Google Suggest API because DDG blocks Render IPs
+        const response = await axios.get(`http://suggestqueries.google.com/complete/search`, {
+            params: { 
+                client: 'chrome', 
+                q: req.query.q 
             }
         });
+        
+        // Google returns data in the format: ["query", ["suggestion1", "suggestion2"]]
         res.json(response.data[1] || []);
     } catch (error) {
         console.error('[Autocomplete Error]:', error.message);
