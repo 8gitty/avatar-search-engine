@@ -76,58 +76,64 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (Spider Swarm Strategy) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Open Data Architecture) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        const category = type === 'videos' ? 'videos' : 'images';
-        
-        // The Swarm: Multiple open-source privacy instances
-        const instances = [
-            'https://searx.be/search',
-            'https://paulgo.io/search',
-            'https://search.mdosch.de/search',
-            'https://searx.tiekoetter.com/search'
-        ];
+        let formattedResults = [];
 
-        let rawResults = [];
+        if (type === 'videos') {
+            // Open Video API (Dailymotion - no API key required, datacenter safe)
+            const response = await axios.get('https://api.dailymotion.com/videos', {
+                params: { search: query, limit: 20, fields: 'title,thumbnail_360_url,url' }
+            });
+            
+            formattedResults = (response.data.list || []).map(item => ({
+                image: item.thumbnail_360_url || '',
+                title: item.title || '',
+                url: `https://www.dailymotion.com/video/${item.id}` || item.url || '',
+                thumbnail: item.thumbnail_360_url || ''
+            }));
+        } else {
+            // Open Image API (Wikimedia Commons - tracker-free, zero IP blocks)
+            const response = await axios.get(`https://commons.wikimedia.org/w/api.php`, {
+                params: {
+                    action: 'query',
+                    generator: 'search',
+                    gsrsearch: query,
+                    gsrnamespace: 6, // Restrict to File namespace
+                    gsrlimit: 24,
+                    prop: 'imageinfo',
+                    iiprop: 'url',
+                    format: 'json'
+                },
+                headers: { 'User-Agent': 'AvatarPrivacyEngine/1.0' }
+            });
 
-        // Loop through the instances until one successfully returns data
-        for (const instance of instances) {
-            try {
-                const response = await axios.get(instance, {
-                    params: { q: query, categories: category, format: 'json' },
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                    timeout: 4000 // Move on quickly if an instance hangs
-                });
-
-                if (response.data && response.data.results && response.data.results.length > 0) {
-                    rawResults = response.data.results;
-                    console.log(`[Media] Successfully extracted data from: ${instance}`);
-                    break; // Found the data, exit the loop!
-                }
-            } catch (e) {
-                console.log(`[Media] Instance blocked or timed out: ${instance}`);
-                continue; // Try the next instance in the swarm
+            const pages = response.data.query?.pages;
+            if (pages) {
+                formattedResults = Object.values(pages).map(page => {
+                    const info = page.imageinfo && page.imageinfo[0];
+                    return {
+                        image: info?.url || '',
+                        title: page.title.replace('File:', '').replace(/\.[^/.]+$/, "") || '',
+                        url: info?.descriptionurl || info?.url || '',
+                        thumbnail: info?.url || ''
+                    };
+                }).filter(item => item.image); // Filter out any empty results
             }
         }
 
-        // Map results to perfectly match your React frontend UI
-        const formattedResults = rawResults.map(item => ({
-            image: item.img_src || item.thumbnail || '',
-            title: item.title || '',
-            url: item.url || '',
-            thumbnail: item.thumbnail || ''
-        }));
-
         res.json({ results: formattedResults });
     } catch (error) {
-        console.error("[Media Proxy Error]:", error.message);
-        res.status(500).json({ error: 'Media proxy blocked or failed.' });
+        console.error("[Media API Error]:", error.message);
+        res.status(500).json({ error: 'Media extraction failed.' });
     }
 });
+
+
 // --- ROUTE 3: ZERO-KNOWLEDGE VAULT ---
 app.post('/vault/sync', async (req, res) => {
     const { userId, encryptedData } = req.body;
