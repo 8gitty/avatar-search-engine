@@ -76,47 +76,41 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (SearxNG Privacy Swap) ---
 app.get('/media', async (req, res) => {
-    const { q: query, type, vqd: clientVqd } = req.query; 
+    const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        let vqd = clientVqd;
-
-        if (!vqd || vqd === 'undefined') {
-            try {
-                // Agent removed: connecting directly via Render's network
-                const tokenRes = await axios.get('https://duckduckgo.com/', { 
-                    params: { q: query, t: 'h_' }, 
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                });
-                const vqdMatch = tokenRes.data.match(/vqd=["']([^"']+)["']/);
-                if (vqdMatch) vqd = vqdMatch[1];
-            } catch (e) {
-                console.log("[Media] Strategy A failed, triggering HTML fallback...");
-            }
-
-            if (!vqd) {
-                const htmlRes = await axios.get('https://html.duckduckgo.com/html/', { 
-                    params: { q: query }, 
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                });
-                const $ = cheerio.load(htmlRes.data);
-                vqd = $('input[name="vqd"]').val();
-            }
-        }
-
-        if (!vqd) throw new Error("VQD Token blocked (403).");
-
-        const endpoint = type === 'videos' ? 'https://duckduckgo.com/v.js' : 'https://duckduckgo.com/i.js';
-        const mediaRes = await axios.get(endpoint, {
-            params: { l: 'us-en', o: 'json', q: query, vqd: vqd, f: ',,,', p: '1' },
-            headers: { 
-                'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json', 'Referer': 'https://duckduckgo.com/'
+        // Map your frontend tab state to the correct Searx category
+        const category = type === 'videos' ? 'videos' : 'images';
+        
+        // Use a public Searx privacy instance (bypasses IP blocks)
+        const response = await axios.get('https://searx.be/search', {
+            params: {
+                q: query,
+                categories: category,
+                format: 'json'
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             }
         });
 
+        // Map SearxNG results to exactly match the old DuckDuckGo format your React code expects
+        const formattedResults = (response.data.results || []).map(item => ({
+            image: item.img_src || item.thumbnail || '',
+            title: item.title || '',
+            url: item.url || '',
+            thumbnail: item.thumbnail || ''
+        }));
+
+        res.json({ results: formattedResults });
+    } catch (error) {
+        console.error("[Media Proxy Error]:", error.message);
+        res.status(500).json({ error: 'Media proxy blocked or failed.' });
+    }
+});
         res.json({ results: mediaRes.data.results });
     } catch (error) {
         console.error("[Media Error]:", error.message);
