@@ -136,7 +136,7 @@ app.get('/ai', async (req, res) => {
     }
 });
 
-// --- ROUTE 3: DEEP MEDIA SCRAPER (Wiki Portraits + Yahoo Pop Culture) ---
+// --- ROUTE 3: DEEP MEDIA SCRAPER (Bing Async HD Engine + Dailymotion) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -145,9 +145,8 @@ app.get('/media', async (req, res) => {
         let formattedResults = [];
 
         if (type === 'videos') {
-            // Dailymotion Open API (Datacenter safe)
             const response = await axios.get('https://api.dailymotion.com/videos', {
-                params: { search: query, limit: 24, fields: 'id,title,thumbnail_480_url,url' },
+                params: { search: query, limit: 30, fields: 'id,title,thumbnail_480_url,url' },
                 timeout: 6000
             });
             formattedResults = (response.data.list || []).map(item => ({
@@ -157,58 +156,58 @@ app.get('/media', async (req, res) => {
                 url: item.url || `https://www.dailymotion.com/video/${item.id}`
             }));
         } else {
-            // STRATEGY 1: Wikipedia Official Page Image (For premium entity portraits)
+            // Bing Async Engine (Streams 40+ HD image results, immune to datacenter IP blocks)
             try {
-                const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
-                    params: { action: 'query', generator: 'search', gsrsearch: query, gsrlimit: 3, prop: 'pageimages', piprop: 'original|thumbnail', pithumbsize: 600, format: 'json' },
-                    headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
-                    timeout: 4000
+                const bingRes = await axios.get('https://www.bing.com/images/async', {
+                    params: { q: query, first: 1, count: 40, scenario: 'ImageHover' },
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        'Accept-Language': 'en-US,en;q=0.9'
+                    },
+                    timeout: 7000
                 });
-                const pages = wikiRes.data.query?.pages;
-                if (pages) {
-                    Object.values(pages).forEach(page => {
-                        const imgUrl = page.original?.source || page.thumbnail?.source;
-                        if (imgUrl) formattedResults.push({ image: imgUrl, thumbnail: page.thumbnail?.source || imgUrl, title: page.title, url: imgUrl });
-                    });
-                }
-            } catch (e) { console.log("[Media] Wiki Images skipped"); }
 
-            // STRATEGY 2: Yahoo Images (Strict Ad-Free Datacenter Scraper for Pop Culture)
-            try {
-                const yahooRes = await axios.get(`https://images.search.yahoo.com/search/images?p=${encodeURIComponent(query)}`, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                    timeout: 6000
-                });
-                
-                // Split ONLY by legitimate image result containers to completely ignore sidebar ads
-                const blocks = yahooRes.data.split('<li class="ld"');
-                
-                for (let i = 1; i < blocks.length; i++) {
-                    const urlMatch = blocks[i].match(/imgurl=([^&"']+)/);
-                    const thumbMatch = blocks[i].match(/<img[^>]+src=['"]([^'"]+)['"]/);
-                    const titleMatch = blocks[i].match(/alt=['"]([^'"]+)['"]/);
-                    
-                    if (urlMatch) {
-                        const cleanUrl = decodeURIComponent(urlMatch[1]);
-                        // Ignore tiny 1x1 tracking pixels
-                        if (!cleanUrl.includes('pixel') && cleanUrl.startsWith('http')) {
+                // Extract all m="{...}" attributes containing direct full-resolution URLs
+                const matches = [...bingRes.data.matchAll(/m="{([^"]+)}"/g)];
+                matches.forEach(m => {
+                    try {
+                        const rawJson = '{' + m[1].replace(/&quot;/g, '"') + '}';
+                        const data = JSON.parse(rawJson);
+                        if (data.murl) {
                             formattedResults.push({
-                                image: cleanUrl,
-                                thumbnail: thumbMatch ? thumbMatch[1] : cleanUrl,
-                                title: titleMatch ? titleMatch[1] : query,
-                                url: cleanUrl
+                                image: data.murl,
+                                thumbnail: data.turl || data.murl,
+                                title: data.t || query,
+                                url: data.purl || data.murl
                             });
                         }
-                    }
-                }
+                    } catch (e) {}
+                });
             } catch (e) {
-                console.log("[Media] Yahoo engine timed out.");
+                console.log("[Media] Bing Async engine error:", e.message);
+            }
+
+            // Fallback to Wikipedia PageImages if under 5 items are found
+            if (formattedResults.length < 5) {
+                try {
+                    const wikiRes = await axios.get('https://en.wikipedia.org/w/api.php', {
+                        params: { action: 'query', generator: 'search', gsrsearch: query, gsrlimit: 10, prop: 'pageimages', piprop: 'original|thumbnail', pithumbsize: 600, format: 'json' },
+                        headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
+                        timeout: 4000
+                    });
+                    const pages = wikiRes.data.query?.pages;
+                    if (pages) {
+                        Object.values(pages).forEach(page => {
+                            const imgUrl = page.original?.source || page.thumbnail?.source;
+                            if (imgUrl) formattedResults.push({ image: imgUrl, thumbnail: page.thumbnail?.source || imgUrl, title: page.title, url: imgUrl });
+                        });
+                    }
+                } catch (e) {}
             }
         }
 
-        // Remove duplicates and return top 24
         const unique = Array.from(new Map(formattedResults.map(item => [item.image, item])).values());
-        res.json({ results: unique.slice(0, 24) });
+        res.json({ results: unique });
     } catch (error) {
         console.error("[Media API Error]:", error.message);
         res.json({ results: [] }); 
