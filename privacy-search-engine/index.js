@@ -24,87 +24,85 @@ app.get('/', (req, res) => {
     res.send('Avatar Private Search Engine API is Live');
 });
 
-// --- ROUTE 1: WEB SEARCH (With Instant Fallback) ---
-// --- ROUTE 1: WEB SEARCH ROUTE (Datacenter-Safe Dual Engine) ---
+// --- ROUTE 1: WEB SEARCH ROUTE (Ironclad Multi-Engine) ---
 app.get('/search', async (req, res) => {
     const { q: query } = req.query;
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
+    let results = [];
+
+    // ENGINE 1: Wikipedia API (Explicit User-Agent prevents 403 blocks)
     try {
-        // 1. Try the Redis Worker first, but ONLY wait 5 seconds
-        if (typeof searchQueue !== 'undefined' && searchQueue && queueEvents) {
-            const job = await searchQueue.add('scrape-job', { query });
-            const unifiedResults = await job.waitUntilFinished(queueEvents, 5000); 
-            if (unifiedResults && unifiedResults.length > 0) {
-                return res.json({ results: unifiedResults });
-            }
-        }
-    } catch (queueError) {
-        console.log("[Search] Worker busy. Engaging instant datacenter-safe fallback...");
+        const wikiRes = await axios.get('https://en.wikipedia.org/w/api.php', {
+            params: {
+                action: 'query',
+                list: 'search',
+                srsearch: query,
+                utf8: 1,
+                format: 'json',
+                srlimit: 5
+            },
+            headers: {
+                'User-Agent': 'AvatarPrivateSearchEngine/1.0 (https://avatar-web-chi.vercel.app; student-project)'
+            },
+            timeout: 5000
+        });
+
+        const wikiItems = wikiRes.data.query?.search || [];
+        wikiItems.forEach(item => {
+            const cleanSnippet = item.snippet.replace(/<\/?[^>]+(>|$)/g, "").trim();
+            results.push({
+                title: item.title,
+                link: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+                snippet: cleanSnippet
+            });
+        });
+    } catch (e) {
+        console.log("[Search] Wikipedia engine error:", e.message);
     }
 
-    // 2. Dual-Engine Web Fallback (Wikipedia API + Yahoo Web Scraper)
+    // ENGINE 2: DuckDuckGo Lite Scraper (Optimized for datacenter IPs)
     try {
-        let results = [];
+        const params = new URLSearchParams();
+        params.append('q', query);
         
-        // Engine A: Wikipedia Open API (100% immune to IP blocks, excellent for entities)
-        try {
-            const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
-                params: { action: 'query', list: 'search', srsearch: query, utf8: 1, format: 'json', srlimit: 4 },
-                timeout: 5000
-            });
-            const wikiItems = wikiRes.data.query?.search || [];
-            wikiItems.forEach(item => {
-                results.push({
-                    title: item.title,
-                    link: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
-                    snippet: item.snippet.replace(/<\/?[^>]+(>|$)/g, "") // Clean HTML tags
-                });
-            });
-        } catch (e) { console.log("[Search] Wiki engine timed out."); }
+        const ddgRes = await axios.post('https://lite.duckduckgo.com/lite/', params, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            timeout: 6000
+        });
 
-        // Engine B: Yahoo Search (Highly resilient to Render Cloud IPs)
-        try {
-            const yahooRes = await axios.get(`https://search.yahoo.com/search`, {
-                params: { p: query },
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-                timeout: 6000
-            });
-            
-            // Split by Yahoo's standard result container
-            const resultBlocks = yahooRes.data.split('class="compTitle'); 
-            
-            for (let i = 1; i < resultBlocks.length; i++) {
-                const block = resultBlocks[i];
-                const urlMatch = block.match(/href="([^"]+)"/);
-                const titleMatch = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
-                const snippetMatch = block.match(/class="compText[^>]*>([\s\S]*?)<\/div>/);
-                
-                if (urlMatch && titleMatch) {
-                    let link = decodeURIComponent(urlMatch[1]);
-                    
-                    // Clean up Yahoo tracking redirects to give users the raw, private URL
-                    if (link.includes('RU=')) {
-                        link = link.split('RU=')[1].split('/RK=')[0];
-                    }
-                    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-                    const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-                    
-                    if (link && title && !link.includes('yahoo.com')) {
-                        results.push({ title, link, snippet });
-                    }
+        const html = ddgRes.data;
+        const resultBlocks = html.split('<td class="result-snippet">');
+
+        for (let i = 1; i < resultBlocks.length; i++) {
+            const snippetText = resultBlocks[i].split('</td>')[0].replace(/<[^>]+>/g, '').trim();
+            const prevBlock = resultBlocks[i - 1];
+            const linkMatch = prevBlock.match(/class="result-link" href="([^"]+)">([\s\S]*?)<\/a>/);
+
+            if (linkMatch) {
+                let link = linkMatch[1];
+                if (link.includes('uddg=')) {
+                    link = decodeURIComponent(link.split('uddg=')[1].split('&')[0]);
+                }
+                const title = linkMatch[2].replace(/<[^>]+>/g, '').trim();
+
+                if (link && title && link.startsWith('http')) {
+                    results.push({ title, link, snippet: snippetText });
                 }
             }
-        } catch (e) { console.log("[Search] Yahoo engine timed out."); }
-
-        // Filter duplicates by URL and return
-        const uniqueResults = Array.from(new Map(results.map(item => [item.link, item])).values());
-        res.json({ results: uniqueResults.slice(0, 15) }); 
-    } catch (fallbackError) {
-        console.error("[Search Fallback Error]:", fallbackError.message);
-        res.json({ results: [] }); 
+        }
+    } catch (e) {
+        console.log("[Search] DDG Lite engine error:", e.message);
     }
+
+    // De-duplicate results by URL and take top 15
+    const uniqueResults = Array.from(new Map(results.map(item => [item.link, item])).values());
+    res.json({ results: uniqueResults.slice(0, 15) });
 });
+
 
 // --- ROUTE 2: AI ANSWER ENGINE (Key-Free Synthesis) ---
 app.get('/ai', async (req, res) => {
