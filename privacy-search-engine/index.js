@@ -76,7 +76,7 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (SearxNG Privacy Swap) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Spider Swarm Strategy) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -84,18 +84,38 @@ app.get('/media', async (req, res) => {
     try {
         const category = type === 'videos' ? 'videos' : 'images';
         
-        const response = await axios.get('https://searx.be/search', {
-            params: {
-                q: query,
-                categories: category,
-                format: 'json'
-            },
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
+        // The Swarm: Multiple open-source privacy instances
+        const instances = [
+            'https://searx.be/search',
+            'https://paulgo.io/search',
+            'https://search.mdosch.de/search',
+            'https://searx.tiekoetter.com/search'
+        ];
 
-        const formattedResults = (response.data.results || []).map(item => ({
+        let rawResults = [];
+
+        // Loop through the instances until one successfully returns data
+        for (const instance of instances) {
+            try {
+                const response = await axios.get(instance, {
+                    params: { q: query, categories: category, format: 'json' },
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 4000 // Move on quickly if an instance hangs
+                });
+
+                if (response.data && response.data.results && response.data.results.length > 0) {
+                    rawResults = response.data.results;
+                    console.log(`[Media] Successfully extracted data from: ${instance}`);
+                    break; // Found the data, exit the loop!
+                }
+            } catch (e) {
+                console.log(`[Media] Instance blocked or timed out: ${instance}`);
+                continue; // Try the next instance in the swarm
+            }
+        }
+
+        // Map results to perfectly match your React frontend UI
+        const formattedResults = rawResults.map(item => ({
             image: item.img_src || item.thumbnail || '',
             title: item.title || '',
             url: item.url || '',
@@ -108,7 +128,6 @@ app.get('/media', async (req, res) => {
         res.status(500).json({ error: 'Media proxy blocked or failed.' });
     }
 });
-
 // --- ROUTE 3: ZERO-KNOWLEDGE VAULT ---
 app.post('/vault/sync', async (req, res) => {
     const { userId, encryptedData } = req.body;
