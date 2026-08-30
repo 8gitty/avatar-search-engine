@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Loader2, ShieldCheck, Bookmark, Menu, X, Globe, Camera, Video, Lock } from 'lucide-react';
+import { Search, Loader2, Bookmark, Menu, X, Globe, Camera, Video, Lock } from 'lucide-react';
 import axios from 'axios';
 import CryptoJS from 'crypto-js';
 import './index.css';
@@ -11,7 +11,6 @@ function App() {
   const [mediaResults, setMediaResults] = useState([]); 
   const [aiSummary, setAiSummary] = useState(null);
   
-  // Directly hardcoded to your exact Render URL
   const API_BASE_URL = 'https://avatar-search-engine.onrender.com';  
   
   const [isLoading, setIsLoading] = useState(false);
@@ -19,12 +18,10 @@ function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [visibleCount, setVisibleCount] = useState(5);
 
-  // --- AUTOCOMPLETE STATE ---
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
 
-  // --- ZERO KNOWLEDGE VAULT STATE ---
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [vaultKey, setVaultKey] = useState('');
   const [bookmarks, setBookmarks] = useState([]);
@@ -46,7 +43,6 @@ function App() {
     }
   }, []);
 
-  // --- AUTOCOMPLETE LOGIC ---
   const handleInputChange = async (e) => {
     const value = e.target.value;
     setQuery(value);
@@ -88,18 +84,15 @@ function App() {
     }
   };
 
-  // --- VAULT LOGIC ---
   const unlockVault = async () => {
     const key = prompt("Enter your AES-256 Vault Password:");
     if (!key) return;
 
     try {
-      // 1. Fetch the encrypted string from MongoDB
       const res = await axios.get(`${API_BASE_URL}/vault/fetch?userId=${userId}`);
       
       if (res.data && res.data.encryptedData) {
         try {
-          // 2. Attempt to decrypt the existing data
           const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
           const decryptedText = bytes.toString(CryptoJS.enc.Utf8);
           
@@ -109,7 +102,6 @@ function App() {
           setBookmarks(decryptedData);
           setVaultKey(key);
         } catch (err) {
-          // 3. If decryption fails, offer a factory reset instead of locking the user out
           const wipe = window.confirm("Invalid key or corrupted data! Do you want to permanently wipe this vault and start fresh with your new key?");
           if (wipe) {
             setVaultKey(key);
@@ -120,12 +112,10 @@ function App() {
           }
         }
       } else {
-        // 4. No data exists yet
         setVaultKey(key);
         alert("Vault initialized! You can now save encrypted bookmarks.");
       }
     } catch (networkErr) {
-      // 5. Catch actual server/database crashes
       alert("Network error: Cannot reach the MongoDB database. Check your backend logs.");
     }
   };
@@ -152,7 +142,6 @@ function App() {
     }
   };
 
-  // --- CORE SEARCH LOGIC ---
   const executeSearch = async (searchQuery, currentType) => {
     if (!searchQuery.trim()) return;
     document.activeElement.blur();
@@ -170,7 +159,12 @@ function App() {
       if (currentType === 'web') {
         const res = await axios.get(`${API_BASE_URL}/search`, { params: { q: searchQuery } });
         setResults(res.data.results || []);
-        setAiSummary(res.data.aiSummary || null);
+        
+        // Make the AI call in parallel for speed, but catch it gracefully if it fails
+        axios.get(`${API_BASE_URL}/ai`, { params: { q: searchQuery } })
+             .then(aiRes => setAiSummary(aiRes.data.summary))
+             .catch(() => setAiSummary(null));
+
       } else {
         const res = await axios.get(`${API_BASE_URL}/media`, { params: { q: searchQuery, type: currentType } });
         setMediaResults(res.data.results || []);
@@ -265,7 +259,7 @@ function App() {
       <div className="results-container">
         
         {/* --- 1. AI SUMMARY BOX --- */}
-        {aiSummary && (
+        {aiSummary && searchType === 'web' && (
             <div className="ai-summary mb-10 p-5 rounded-xl border border-blue-500/30 bg-blue-50/50 shadow-sm" style={{ marginBottom: '2rem', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid rgba(59, 130, 246, 0.3)', backgroundColor: 'rgba(239, 246, 255, 0.5)' }}>
                 <h4 className="text-xs font-bold text-blue-600 mb-3 tracking-widest uppercase flex items-center gap-2" style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#2563eb', marginBottom: '0.75rem', letterSpacing: '0.1em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   🛡️ Avatar AI Synthesized Result
@@ -279,24 +273,12 @@ function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '2rem' }}>
             {results.slice(0, visibleCount).map((item, index) => {
               
-              let cleanUrl = item.URL || item.FirstURL;
+              // NEW MAPPING: Look for 'link' first, fallback to old keys
+              let cleanUrl = item.link || item.URL || item.FirstURL;
               if (!cleanUrl) return null; 
               
-              if (cleanUrl.includes('uddg=')) {
-                try {
-                  cleanUrl = decodeURIComponent(cleanUrl.split('uddg=')[1].split('&')[0]);
-                } catch (e) {}
-              }
-
-              const title = item.Title || item.Text.split(' - ')[0];
-
-              if (
-                cleanUrl.includes('y.js') || 
-                cleanUrl.includes('ad_domain') || 
-                title.toLowerCase().includes('ad viewing ads')
-              ) {
-                return null;
-              }
+              const title = item.title || item.Title || "No Title";
+              const snippet = item.snippet || item.Text || "";
 
               const isBookmarked = bookmarks.some(b => b.FirstURL === cleanUrl);
 
@@ -321,7 +303,7 @@ function App() {
                     
                     <button 
                       className={`bookmark-btn ${isBookmarked ? 'bookmarked' : ''}`} 
-                      onClick={() => toggleBookmark({ Title: title, FirstURL: cleanUrl, Text: item.Text })}
+                      onClick={() => toggleBookmark({ Title: title, FirstURL: cleanUrl, Text: snippet })}
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
                     >
                       <Bookmark size={18} fill={isBookmarked ? '#1a73e8' : 'none'} color={isBookmarked ? '#1a73e8' : '#5f6368'} />
@@ -334,7 +316,7 @@ function App() {
                   </a>
                   
                   <p style={{ fontSize: '14px', color: '#4d5156', lineHeight: '1.58', margin: 0, maxWidth: '800px' }}>
-                    {item.Text}
+                    {snippet}
                   </p>
                 </div>
               );
@@ -353,6 +335,7 @@ function App() {
           </div>
         )}
 
+        {/* --- 3. IMAGES --- */}
         {searchType === 'images' && (
           <div className="media-grid">
             {mediaResults.map((img, i) => (
@@ -364,13 +347,14 @@ function App() {
           </div>
         )}
 
+        {/* --- 4. VIDEOS (Fixed thumbnail mapping) --- */}
         {searchType === 'videos' && (
           <div className="media-grid">
             {mediaResults.map((vid, i) => (
-              <a key={i} href={vid.content || vid.url} target="_blank" rel="noopener noreferrer" className="media-card">
+              <a key={i} href={vid.url || vid.content} target="_blank" rel="noopener noreferrer" className="media-card">
                 <div className="video-thumb-wrapper">
-                  <img src={vid.images?.medium || vid.images?.small} alt={vid.title} loading="lazy" />
-                  <div className="play-badge"><Video size={12} /> {vid.duration}</div>
+                  <img src={vid.thumbnail || vid.image} alt={vid.title} loading="lazy" />
+                  <div className="play-badge"><Video size={12} /> Play</div>
                 </div>
                 <div className="media-title">{vid.title}</div>
               </a>
