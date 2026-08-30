@@ -76,47 +76,60 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (Qwant Privacy Engine) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Bing + Dailymotion Engine) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        // Qwant neatly separates media into 'images' and 'videos' endpoints
-        const endpoint = type === 'videos' ? 'videos' : 'images';
-        
-        const response = await axios.get(`https://api.qwant.com/v3/search/${endpoint}`, {
-            params: {
-                q: query,
-                count: 24,
-                locale: 'en_US',
-                safesearch: 1,
-                device: 'desktop'
-            },
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            timeout: 10000 // Forces the request to fail gracefully after 10 seconds instead of hanging
-        });
+        let formattedResults = [];
 
-        // Extract the array of items from Qwant's JSON structure
-        const items = response.data?.data?.result?.items || [];
-        
-        // Map perfectly to your existing React UI layout
-        const formattedResults = items.map(item => ({
-            image: item.media || item.thumbnail || '',
-            title: item.title || '',
-            url: item.url || '',
-            thumbnail: item.thumbnail || item.media || ''
-        })).filter(item => item.image);
+        if (type === 'videos') {
+            // Dailymotion Open API (100% reliable for cloud servers, no keys needed)
+            const response = await axios.get('https://api.dailymotion.com/videos', {
+                params: { search: query, limit: 24, fields: 'title,thumbnail_360_url,url,id' },
+                timeout: 8000
+            });
+            formattedResults = (response.data.list || []).map(item => ({
+                image: item.thumbnail_360_url || '',
+                title: item.title || '',
+                url: `https://www.dailymotion.com/video/${item.id}` || '',
+                thumbnail: item.thumbnail_360_url || ''
+            }));
+        } else {
+            // Bing Image Scraper (Bypasses bot-blocks by extracting hidden DOM JSON)
+            const response = await axios.get(`https://www.bing.com/images/search?q=${encodeURIComponent(query)}`, {
+                headers: { 
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                },
+                timeout: 8000
+            });
+
+            // Dependency-free extraction using Regex
+            const matches = [...response.data.matchAll(/m='(\{.*?\})'/g)];
+            
+            formattedResults = matches.map(match => {
+                try {
+                    const data = JSON.parse(match[1]);
+                    return {
+                        image: data.murl || '',
+                        title: data.t || query,
+                        url: data.purl || '',
+                        thumbnail: data.turl || ''
+                    };
+                } catch (e) {
+                    return null;
+                }
+            }).filter(item => item && item.image).slice(0, 30); // Return top 30 clean results
+        }
 
         res.json({ results: formattedResults });
     } catch (error) {
         console.error("[Media API Error]:", error.message);
-        // Return an empty array so the frontend stops spinning and recovers gracefully
         res.json({ results: [] }); 
     }
 });
+
 // --- ROUTE 3: ZERO-KNOWLEDGE VAULT ---
 app.post('/vault/sync', async (req, res) => {
     const { userId, encryptedData } = req.body;
