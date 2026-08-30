@@ -76,7 +76,7 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (Bing + Dailymotion Engine) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Multi-Engine Dependency-Free) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -85,7 +85,7 @@ app.get('/media', async (req, res) => {
         let formattedResults = [];
 
         if (type === 'videos') {
-            // Dailymotion Open API (100% reliable for cloud servers, no keys needed)
+            // Dailymotion Open API
             const response = await axios.get('https://api.dailymotion.com/videos', {
                 params: { search: query, limit: 24, fields: 'title,thumbnail_360_url,url,id' },
                 timeout: 8000
@@ -97,33 +97,50 @@ app.get('/media', async (req, res) => {
                 thumbnail: item.thumbnail_360_url || ''
             }));
         } else {
-            // Bing Image Scraper (Bypasses bot-blocks by extracting hidden DOM JSON)
-            const response = await axios.get(`https://www.bing.com/images/search?q=${encodeURIComponent(query)}`, {
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-                },
-                timeout: 8000
-            });
+            // STRATEGY 1: BING IMAGES (Advanced Regex)
+            try {
+                const bingRes = await axios.get(`https://www.bing.com/images/search?q=${encodeURIComponent(query)}`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 5000
+                });
+                
+                // Smart Regex: Matches both "murl":"..." and &quot;murl&quot;:&quot;...&quot; formats
+                const urlMatches = [...bingRes.data.matchAll(/(&quot;|")murl\1:\1(.*?)\1/g)];
+                const titleMatches = [...bingRes.data.matchAll(/(&quot;|")t\1:\1(.*?)\1/g)];
 
-            // Dependency-free extraction using Regex
-            const matches = [...response.data.matchAll(/m='(\{.*?\})'/g)];
-            
-            formattedResults = matches.map(match => {
-                try {
-                    const data = JSON.parse(match[1]);
-                    return {
-                        image: data.murl || '',
-                        title: data.t || query,
-                        url: data.purl || '',
-                        thumbnail: data.turl || ''
-                    };
-                } catch (e) {
-                    return null;
-                }
-            }).filter(item => item && item.image).slice(0, 30); // Return top 30 clean results
+                formattedResults = urlMatches.map((match, i) => ({
+                    image: match[2],
+                    title: titleMatches[i] ? titleMatches[i][2] : query,
+                    url: match[2],
+                    thumbnail: match[2]
+                }));
+            } catch (e) {
+                console.log("[Media] Bing timed out or changed HTML structure.");
+            }
+
+            // STRATEGY 2: YAHOO IMAGES FALLBACK
+            if (formattedResults.length === 0) {
+                console.log("[Media] Bing empty, engaging Yahoo Fallback...");
+                const yahooRes = await axios.get(`https://images.search.yahoo.com/search/images?p=${encodeURIComponent(query)}`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 5000
+                });
+                
+                // Extract original image URLs hidden in Yahoo's link parameters
+                const yahooUrls = [...yahooRes.data.matchAll(/imgurl=([^&]+)/g)];
+                
+                formattedResults = yahooUrls.map(match => {
+                    try {
+                        const cleanUrl = decodeURIComponent(match[1]);
+                        return { image: cleanUrl, title: query, url: cleanUrl, thumbnail: cleanUrl };
+                    } catch (e) { return null; }
+                }).filter(item => item !== null);
+            }
         }
 
-        res.json({ results: formattedResults });
+        // Filter duplicates and return top 24 results
+        const uniqueResults = Array.from(new Map(formattedResults.map(item => [item.image, item])).values());
+        res.json({ results: uniqueResults.slice(0, 24) });
     } catch (error) {
         console.error("[Media API Error]:", error.message);
         res.json({ results: [] }); 
