@@ -40,7 +40,7 @@ app.get('/search', async (req, res) => {
                 srsearch: query,
                 utf8: 1,
                 format: 'json',
-                srlimit: 5
+                srlimit: 15 // Increased from 5 to 15 to guarantee pagination works
             },
             headers: {
                 'User-Agent': 'AvatarPrivateSearchEngine/1.0 (https://avatar-web-chi.vercel.app; student-project)'
@@ -98,9 +98,9 @@ app.get('/search', async (req, res) => {
         console.log("[Search] DDG Lite engine error:", e.message);
     }
 
-    // De-duplicate results by URL and take top 15
+    // De-duplicate results by URL and take top 30 (Increased from 15)
     const uniqueResults = Array.from(new Map(results.map(item => [item.link, item])).values());
-    res.json({ results: uniqueResults.slice(0, 15) });
+    res.json({ results: uniqueResults.slice(0, 30) });
 });
 
 // --- ROUTE 2: AI ANSWER ENGINE (Wikipedia Context API) ---
