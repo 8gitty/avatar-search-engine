@@ -25,13 +25,14 @@ app.get('/', (req, res) => {
 });
 
 // --- ROUTE 1: WEB SEARCH (With Instant Fallback) ---
+// --- ROUTE 1: WEB SEARCH ROUTE (Datacenter-Safe Dual Engine) ---
 app.get('/search', async (req, res) => {
     const { q: query } = req.query;
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
         // 1. Try the Redis Worker first, but ONLY wait 5 seconds
-        if (searchQueue && queueEvents) {
+        if (typeof searchQueue !== 'undefined' && searchQueue && queueEvents) {
             const job = await searchQueue.add('scrape-job', { query });
             const unifiedResults = await job.waitUntilFinished(queueEvents, 5000); 
             if (unifiedResults && unifiedResults.length > 0) {
@@ -39,43 +40,66 @@ app.get('/search', async (req, res) => {
             }
         }
     } catch (queueError) {
-        console.log("[Search] Worker busy/offline. Engaging instant fallback...");
+        console.log("[Search] Worker busy. Engaging instant datacenter-safe fallback...");
     }
 
-    // 2. Direct Web Fallback (Executes instantly if the worker fails or times out)
+    // 2. Dual-Engine Web Fallback (Wikipedia API + Yahoo Web Scraper)
     try {
-        const htmlRes = await axios.get('https://html.duckduckgo.com/html/', {
-            params: { q: query },
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            timeout: 8000
-        });
-
-        const results = [];
-        const resultBlocks = htmlRes.data.split('class="result__body"'); 
+        let results = [];
         
-        for (let i = 1; i < resultBlocks.length; i++) {
-            const block = resultBlocks[i];
+        // Engine A: Wikipedia Open API (100% immune to IP blocks, excellent for entities)
+        try {
+            const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+                params: { action: 'query', list: 'search', srsearch: query, utf8: 1, format: 'json', srlimit: 4 },
+                timeout: 5000
+            });
+            const wikiItems = wikiRes.data.query?.search || [];
+            wikiItems.forEach(item => {
+                results.push({
+                    title: item.title,
+                    link: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title.replace(/ /g, '_'))}`,
+                    snippet: item.snippet.replace(/<\/?[^>]+(>|$)/g, "") // Clean HTML tags
+                });
+            });
+        } catch (e) { console.log("[Search] Wiki engine timed out."); }
+
+        // Engine B: Yahoo Search (Highly resilient to Render Cloud IPs)
+        try {
+            const yahooRes = await axios.get(`https://search.yahoo.com/search`, {
+                params: { p: query },
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                timeout: 6000
+            });
             
-            const urlMatch = block.match(/<a class="result__url" href="([^"]+)"/);
-            const titleMatch = block.match(/<a class="result__a"[^>]*>([\s\S]*?)<\/a>/);
-            const snippetMatch = block.match(/<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/);
+            // Split by Yahoo's standard result container
+            const resultBlocks = yahooRes.data.split('class="compTitle'); 
             
-            if (urlMatch && titleMatch) {
-                let link = urlMatch[1];
-                if (link.includes('uddg=')) {
-                    link = decodeURIComponent(link.split('uddg=')[1].split('&')[0]);
-                }
+            for (let i = 1; i < resultBlocks.length; i++) {
+                const block = resultBlocks[i];
+                const urlMatch = block.match(/href="([^"]+)"/);
+                const titleMatch = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/);
+                const snippetMatch = block.match(/class="compText[^>]*>([\s\S]*?)<\/div>/);
                 
-                const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
-                const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
-                
-                if (link && title) {
-                    results.push({ title, link, snippet });
+                if (urlMatch && titleMatch) {
+                    let link = decodeURIComponent(urlMatch[1]);
+                    
+                    // Clean up Yahoo tracking redirects to give users the raw, private URL
+                    if (link.includes('RU=')) {
+                        link = link.split('RU=')[1].split('/RK=')[0];
+                    }
+                    const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+                    const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+                    
+                    if (link && title && !link.includes('yahoo.com')) {
+                        results.push({ title, link, snippet });
+                    }
                 }
             }
-        }
+        } catch (e) { console.log("[Search] Yahoo engine timed out."); }
 
-        res.json({ results: results.slice(0, 15) }); 
+        // Filter duplicates by URL and return
+        const uniqueResults = Array.from(new Map(results.map(item => [item.link, item])).values());
+        res.json({ results: uniqueResults.slice(0, 15) }); 
     } catch (fallbackError) {
         console.error("[Search Fallback Error]:", fallbackError.message);
         res.json({ results: [] }); 
