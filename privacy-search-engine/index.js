@@ -136,7 +136,7 @@ app.get('/ai', async (req, res) => {
     }
 });
 
-// --- ROUTE 3: DEEP MEDIA SCRAPER (Wikimedia Commons + Dailymotion HD) ---
+// --- ROUTE 3: DEEP MEDIA SCRAPER (Wiki Portraits + Yahoo Pop Culture) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -145,6 +145,7 @@ app.get('/media', async (req, res) => {
         let formattedResults = [];
 
         if (type === 'videos') {
+            // Dailymotion Open API (Datacenter safe)
             const response = await axios.get('https://api.dailymotion.com/videos', {
                 params: { search: query, limit: 24, fields: 'id,title,thumbnail_480_url,url' },
                 timeout: 6000
@@ -156,37 +157,56 @@ app.get('/media', async (req, res) => {
                 url: item.url || `https://www.dailymotion.com/video/${item.id}`
             }));
         } else {
-            // Direct Open Image API (Wikimedia Commons - Immune to IP Blocks)
-            const response = await axios.get(`https://commons.wikimedia.org/w/api.php`, {
-                params: {
-                    action: 'query',
-                    generator: 'search',
-                    gsrsearch: query,
-                    gsrnamespace: 6, // Restrict to Image/File namespace
-                    gsrlimit: 24,
-                    prop: 'imageinfo',
-                    iiprop: 'url',
-                    format: 'json'
-                },
-                headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
-                timeout: 6000
-            });
+            // STRATEGY 1: Wikipedia Official Page Image (For premium entity portraits)
+            try {
+                const wikiRes = await axios.get(`https://en.wikipedia.org/w/api.php`, {
+                    params: { action: 'query', generator: 'search', gsrsearch: query, gsrlimit: 3, prop: 'pageimages', piprop: 'original|thumbnail', pithumbsize: 600, format: 'json' },
+                    headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
+                    timeout: 4000
+                });
+                const pages = wikiRes.data.query?.pages;
+                if (pages) {
+                    Object.values(pages).forEach(page => {
+                        const imgUrl = page.original?.source || page.thumbnail?.source;
+                        if (imgUrl) formattedResults.push({ image: imgUrl, thumbnail: page.thumbnail?.source || imgUrl, title: page.title, url: imgUrl });
+                    });
+                }
+            } catch (e) { console.log("[Media] Wiki Images skipped"); }
 
-            const pages = response.data.query?.pages;
-            if (pages) {
-                formattedResults = Object.values(pages).map(page => {
-                    const info = page.imageinfo && page.imageinfo[0];
-                    const imgUrl = info?.url || '';
-                    return {
-                        image: imgUrl,
-                        thumbnail: imgUrl,
-                        title: page.title.replace('File:', '').replace(/\.[^/.]+$/, ""), // Clean up title
-                        url: info?.descriptionurl || imgUrl
-                    };
-                }).filter(item => item.image); // Ensure no empty images get passed
+            // STRATEGY 2: Yahoo Images (Strict Ad-Free Datacenter Scraper for Pop Culture)
+            try {
+                const yahooRes = await axios.get(`https://images.search.yahoo.com/search/images?p=${encodeURIComponent(query)}`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+                    timeout: 6000
+                });
+                
+                // Split ONLY by legitimate image result containers to completely ignore sidebar ads
+                const blocks = yahooRes.data.split('<li class="ld"');
+                
+                for (let i = 1; i < blocks.length; i++) {
+                    const urlMatch = blocks[i].match(/imgurl=([^&"']+)/);
+                    const thumbMatch = blocks[i].match(/<img[^>]+src=['"]([^'"]+)['"]/);
+                    const titleMatch = blocks[i].match(/alt=['"]([^'"]+)['"]/);
+                    
+                    if (urlMatch) {
+                        const cleanUrl = decodeURIComponent(urlMatch[1]);
+                        // Ignore tiny 1x1 tracking pixels
+                        if (!cleanUrl.includes('pixel') && cleanUrl.startsWith('http')) {
+                            formattedResults.push({
+                                image: cleanUrl,
+                                thumbnail: thumbMatch ? thumbMatch[1] : cleanUrl,
+                                title: titleMatch ? titleMatch[1] : query,
+                                url: cleanUrl
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log("[Media] Yahoo engine timed out.");
             }
         }
 
+        // Remove duplicates and return top 24
         const unique = Array.from(new Map(formattedResults.map(item => [item.image, item])).values());
         res.json({ results: unique.slice(0, 24) });
     } catch (error) {
