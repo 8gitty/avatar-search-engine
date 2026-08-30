@@ -82,10 +82,8 @@ app.get('/media', async (req, res) => {
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        // Map your frontend tab state to the correct Searx category
         const category = type === 'videos' ? 'videos' : 'images';
         
-        // Use a public Searx privacy instance (bypasses IP blocks)
         const response = await axios.get('https://searx.be/search', {
             params: {
                 q: query,
@@ -97,7 +95,6 @@ app.get('/media', async (req, res) => {
             }
         });
 
-        // Map SearxNG results to exactly match the old DuckDuckGo format your React code expects
         const formattedResults = (response.data.results || []).map(item => ({
             image: item.img_src || item.thumbnail || '',
             title: item.title || '',
@@ -109,12 +106,6 @@ app.get('/media', async (req, res) => {
     } catch (error) {
         console.error("[Media Proxy Error]:", error.message);
         res.status(500).json({ error: 'Media proxy blocked or failed.' });
-    }
-});
-        res.json({ results: mediaRes.data.results });
-    } catch (error) {
-        console.error("[Media Error]:", error.message);
-        res.status(500).json({ error: 'Media extraction failed.' });
     }
 });
 
