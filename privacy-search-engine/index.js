@@ -103,40 +103,29 @@ app.get('/search', async (req, res) => {
     res.json({ results: uniqueResults.slice(0, 15) });
 });
 
-
-// --- ROUTE 2: AI ANSWER ENGINE (Key-Free Synthesis) ---
+// --- ROUTE 2: AI ANSWER ENGINE (Wikipedia Context API) ---
 app.get('/ai', async (req, res) => {
     const { q: query } = req.query;
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        // Fetch top search results for context
-        const htmlRes = await axios.get('https://html.duckduckgo.com/html/', {
-            params: { q: query },
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-            timeout: 6000
+        // Fetch context from Wikipedia (100% Datacenter Safe)
+        const wikiRes = await axios.get('https://en.wikipedia.org/w/api.php', {
+            params: { action: 'query', list: 'search', srsearch: query, utf8: 1, format: 'json', srlimit: 3 },
+            headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
+            timeout: 5000
         });
 
-        const resultBlocks = htmlRes.data.split('class="result__body"'); 
-        let combinedContext = [];
-        
-        // Extract the text from the top 3 snippets
-        for (let i = 1; i < Math.min(4, resultBlocks.length); i++) {
-            const snippetMatch = resultBlocks[i].match(/<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/);
-            if (snippetMatch) {
-                combinedContext.push(snippetMatch[1].replace(/<[^>]+>/g, '').trim());
-            }
+        const items = wikiRes.data.query?.search || [];
+        if (items.length === 0) {
+            return res.json({ summary: "No verified data found to synthesize an AI response for this query." });
         }
 
-        if (combinedContext.length === 0) {
-            return res.json({ summary: "I couldn't find enough verified information to generate an AI summary for this query." });
-        }
-
-        // Clean up the text to sound like a cohesive AI response
-        const rawText = combinedContext.join(" ").replace(/\.\.\./g, '.');
-        const sentences = rawText.split('. ').filter(s => s.length > 20);
+        // Clean HTML tags and combine the top snippets
+        let combinedText = items.map(item => item.snippet.replace(/<\/?[^>]+(>|$)/g, "")).join(" ");
         
-        // Remove duplicates and synthesize a 3-sentence summary
+        // Extractive synthesis: Format into a clean 2-3 sentence summary
+        const sentences = combinedText.split('. ').filter(s => s.length > 15);
         const uniqueSentences = Array.from(new Set(sentences)).slice(0, 3);
         const finalSummary = uniqueSentences.join('. ') + (uniqueSentences.length > 0 ? '.' : '');
 
@@ -147,7 +136,7 @@ app.get('/ai', async (req, res) => {
     }
 });
 
-// --- ROUTE 3: DEEP MEDIA SCRAPER (Google Images + Dailymotion HD) ---
+// --- ROUTE 3: DEEP MEDIA SCRAPER (Wikimedia Commons + Dailymotion HD) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
@@ -156,7 +145,6 @@ app.get('/media', async (req, res) => {
         let formattedResults = [];
 
         if (type === 'videos') {
-            // Dailymotion API with explicit 480p thumbnail URLs
             const response = await axios.get('https://api.dailymotion.com/videos', {
                 params: { search: query, limit: 24, fields: 'id,title,thumbnail_480_url,url' },
                 timeout: 6000
@@ -168,24 +156,34 @@ app.get('/media', async (req, res) => {
                 url: item.url || `https://www.dailymotion.com/video/${item.id}`
             }));
         } else {
-            // Direct Google Images Scraper (No IP blocks, highly relevant results)
-            const response = await axios.get(`https://www.google.com/search?q=${encodeURIComponent(query)}&tbm=isch`, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+            // Direct Open Image API (Wikimedia Commons - Immune to IP Blocks)
+            const response = await axios.get(`https://commons.wikimedia.org/w/api.php`, {
+                params: {
+                    action: 'query',
+                    generator: 'search',
+                    gsrsearch: query,
+                    gsrnamespace: 6, // Restrict to Image/File namespace
+                    gsrlimit: 24,
+                    prop: 'imageinfo',
+                    iiprop: 'url',
+                    format: 'json'
+                },
+                headers: { 'User-Agent': 'AvatarPrivateSearchEngine/1.0' },
                 timeout: 6000
             });
 
-            // Extract direct image URLs from embedded Google data
-            const fullImageMatches = [...response.data.matchAll(/\["(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))",\s*\d+,\s*\d+\]/g)];
-            const thumbMatches = [...response.data.matchAll(/(https?:\/\/encrypted-tbn[0-9]\.gstatic\.com\/images\?q=[^"&\s]+)/g)];
-
-            if (fullImageMatches.length > 0) {
-                formattedResults = fullImageMatches.map(m => ({
-                    image: m[1], thumbnail: m[1], title: query, url: m[1]
-                }));
-            } else if (thumbMatches.length > 0) {
-                formattedResults = thumbMatches.map(m => ({
-                    image: m[1], thumbnail: m[1], title: query, url: m[1]
-                }));
+            const pages = response.data.query?.pages;
+            if (pages) {
+                formattedResults = Object.values(pages).map(page => {
+                    const info = page.imageinfo && page.imageinfo[0];
+                    const imgUrl = info?.url || '';
+                    return {
+                        image: imgUrl,
+                        thumbnail: imgUrl,
+                        title: page.title.replace('File:', '').replace(/\.[^/.]+$/, ""), // Clean up title
+                        url: info?.descriptionurl || imgUrl
+                    };
+                }).filter(item => item.image); // Ensure no empty images get passed
             }
         }
 
