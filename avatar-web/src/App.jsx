@@ -16,7 +16,10 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(5);
+  
+  // PAGINATION COUNTS FOR EACH TAB
+  const [visibleWebCount, setVisibleWebCount] = useState(5);
+  const [visibleMediaCount, setVisibleMediaCount] = useState(12);
 
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -95,34 +98,32 @@ function App() {
         try {
           const bytes = CryptoJS.AES.decrypt(res.data.encryptedData, key);
           const decryptedText = bytes.toString(CryptoJS.enc.Utf8);
+          if (!decryptedText) throw new Error("Decryption failed");
           
-          if (!decryptedText) throw new Error("Decryption resulted in empty string");
-          
-          const decryptedData = JSON.parse(decryptedText);
-          setBookmarks(decryptedData);
+          setBookmarks(JSON.parse(decryptedText));
           setVaultKey(key);
         } catch (err) {
-          const wipe = window.confirm("Invalid key or corrupted data! Do you want to permanently wipe this vault and start fresh with your new key?");
+          const wipe = window.confirm("Invalid key! Wipe vault and reset?");
           if (wipe) {
             setVaultKey(key);
             setBookmarks([]);
             const cipherText = CryptoJS.AES.encrypt(JSON.stringify([]), key).toString();
             await axios.post(`${API_BASE_URL}/vault/sync`, { userId, encryptedData: cipherText });
-            alert("Vault has been successfully factory reset!");
+            alert("Vault reset successfully!");
           }
         }
       } else {
         setVaultKey(key);
-        alert("Vault initialized! You can now save encrypted bookmarks.");
+        alert("Vault initialized!");
       }
     } catch (networkErr) {
-      alert("Network error: Cannot reach the MongoDB database. Check your backend logs.");
+      alert("Network error: Vault unreachable.");
     }
   };
 
   const toggleBookmark = async (item) => {
     if (!vaultKey) {
-      alert("You must unlock the Vault to save bookmarks.");
+      alert("Unlock the Vault to save bookmarks.");
       setIsSidebarOpen(true);
       return;
     }
@@ -153,14 +154,14 @@ function App() {
     setResults([]);
     setMediaResults([]);
     setAiSummary(null);
-    setVisibleCount(5); 
+    setVisibleWebCount(5); 
+    setVisibleMediaCount(12);
     
     try {
       if (currentType === 'web') {
         const res = await axios.get(`${API_BASE_URL}/search`, { params: { q: searchQuery } });
         setResults(res.data.results || []);
         
-        // Make the AI call in parallel for speed, but catch it gracefully if it fails
         axios.get(`${API_BASE_URL}/ai`, { params: { q: searchQuery } })
              .then(aiRes => setAiSummary(aiRes.data.summary))
              .catch(() => setAiSummary(null));
@@ -258,7 +259,7 @@ function App() {
 
       <div className="results-container">
         
-        {/* --- 1. AI SUMMARY BOX --- */}
+        {/* --- AI SUMMARY BOX --- */}
         {aiSummary && searchType === 'web' && (
             <div className="ai-summary mb-10 p-5 rounded-xl border border-blue-500/30 bg-blue-50/50 shadow-sm" style={{ marginBottom: '2rem', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid rgba(59, 130, 246, 0.3)', backgroundColor: 'rgba(239, 246, 255, 0.5)' }}>
                 <h4 className="text-xs font-bold text-blue-600 mb-3 tracking-widest uppercase flex items-center gap-2" style={{ fontSize: '0.75rem', fontWeight: 'bold', color: '#2563eb', marginBottom: '0.75rem', letterSpacing: '0.1em', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -268,39 +269,31 @@ function App() {
             </div>
         )}
 
-        {/* --- 2. STANDARD WEB RESULTS --- */}
+        {/* --- WEB RESULTS --- */}
         {searchType === 'web' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '2rem' }}>
-            {results.slice(0, visibleCount).map((item, index) => {
-              
-              // NEW MAPPING: Look for 'link' first, fallback to old keys
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem', marginTop: '2rem', width: '100%', maxWidth: '650px' }}>
+            {results.slice(0, visibleWebCount).map((item, index) => {
               let cleanUrl = item.link || item.URL || item.FirstURL;
               if (!cleanUrl) return null; 
               
               const title = item.title || item.Title || "No Title";
               const snippet = item.snippet || item.Text || "";
-
               const isBookmarked = bookmarks.some(b => b.FirstURL === cleanUrl);
 
               return (
                 <div key={index} style={{ paddingBottom: '1.5rem', borderBottom: '1px solid #eaeaea' }}>
-                  
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase', backgroundColor: '#f1f3f4', padding: '2px 8px', borderRadius: '12px', color: '#5f6368' }}>
                         {(() => {
-                          try {
-                            return new URL(cleanUrl).hostname.replace('www.', '');
-                          } catch(e) {
-                            return 'WEB';
-                          }
+                          try { return new URL(cleanUrl).hostname.replace('www.', ''); }
+                          catch(e) { return 'WEB'; }
                         })()}
                       </span>
                       <span style={{ fontSize: '13px', color: '#202124', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '300px' }}>
                         {cleanUrl}
                       </span>
                     </div>
-                    
                     <button 
                       className={`bookmark-btn ${isBookmarked ? 'bookmarked' : ''}`} 
                       onClick={() => toggleBookmark({ Title: title, FirstURL: cleanUrl, Text: snippet })}
@@ -309,24 +302,21 @@ function App() {
                       <Bookmark size={18} fill={isBookmarked ? '#1a73e8' : 'none'} color={isBookmarked ? '#1a73e8' : '#5f6368'} />
                     </button>
                   </div>
-                  
-                  <a href={cleanUrl} target="_blank" rel="noopener noreferrer" 
-                     style={{ fontSize: '20px', color: '#1a0dab', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
+                  <a href={cleanUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: '20px', color: '#1a0dab', textDecoration: 'none', fontWeight: '500', display: 'block', marginBottom: '6px' }}>
                     {title}
                   </a>
-                  
-                  <p style={{ fontSize: '14px', color: '#4d5156', lineHeight: '1.58', margin: 0, maxWidth: '800px' }}>
+                  <p style={{ fontSize: '14px', color: '#4d5156', lineHeight: '1.58', margin: 0 }}>
                     {snippet}
                   </p>
                 </div>
               );
             })}
 
-            {results.length > visibleCount && (
-              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem', paddingBottom: '4rem' }}>
+            {results.length > visibleWebCount && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem', paddingBottom: '3rem' }}>
                 <button 
-                  onClick={() => setVisibleCount(prev => prev + 5)}
-                  style={{ padding: '10px 24px', fontSize: '14px', fontWeight: '600', color: '#1a73e8', backgroundColor: '#f8f9fa', border: '1px solid #dadce0', borderRadius: '24px', cursor: 'pointer' }}
+                  onClick={() => setVisibleWebCount(prev => prev + 5)}
+                  className="load-more-btn"
                 >
                   Load more results
                 </button>
@@ -335,30 +325,56 @@ function App() {
           </div>
         )}
 
-        {/* --- 3. IMAGES --- */}
+        {/* --- IMAGES --- */}
         {searchType === 'images' && (
-          <div className="media-grid">
-            {mediaResults.map((img, i) => (
-              <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" className="media-card">
-                <img src={img.thumbnail || img.image} alt={img.title} loading="lazy" />
-                <div className="media-title">{img.title}</div>
-              </a>
-            ))}
+          <div style={{ width: '100%' }}>
+            <div className="media-grid">
+              {mediaResults.slice(0, visibleMediaCount).map((img, i) => (
+                <a key={i} href={img.url} target="_blank" rel="noopener noreferrer" className="media-card">
+                  <img src={img.thumbnail || img.image} alt={img.title} loading="lazy" />
+                  <div className="media-title">{img.title}</div>
+                </a>
+              ))}
+            </div>
+            
+            {mediaResults.length > visibleMediaCount && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem', paddingBottom: '3rem' }}>
+                <button 
+                  onClick={() => setVisibleMediaCount(prev => prev + 12)}
+                  className="load-more-btn"
+                >
+                  Load more results
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* --- 4. VIDEOS (Fixed thumbnail mapping) --- */}
+        {/* --- VIDEOS --- */}
         {searchType === 'videos' && (
-          <div className="media-grid">
-            {mediaResults.map((vid, i) => (
-              <a key={i} href={vid.url || vid.content} target="_blank" rel="noopener noreferrer" className="media-card">
-                <div className="video-thumb-wrapper">
-                  <img src={vid.thumbnail || vid.image} alt={vid.title} loading="lazy" />
-                  <div className="play-badge"><Video size={12} /> Play</div>
-                </div>
-                <div className="media-title">{vid.title}</div>
-              </a>
-            ))}
+          <div style={{ width: '100%' }}>
+            <div className="media-grid">
+              {mediaResults.slice(0, visibleMediaCount).map((vid, i) => (
+                <a key={i} href={vid.url || vid.content} target="_blank" rel="noopener noreferrer" className="media-card">
+                  <div className="video-thumb-wrapper">
+                    <img src={vid.thumbnail || vid.image} alt={vid.title} loading="lazy" />
+                    <div className="play-badge"><Video size={12} /> Play</div>
+                  </div>
+                  <div className="media-title">{vid.title}</div>
+                </a>
+              ))}
+            </div>
+
+            {mediaResults.length > visibleMediaCount && (
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem', paddingBottom: '3rem' }}>
+                <button 
+                  onClick={() => setVisibleMediaCount(prev => prev + 12)}
+                  className="load-more-btn"
+                >
+                  Load more results
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -371,11 +387,11 @@ function App() {
         <div className="vault-content">
           {!vaultKey ? (
             <div style={{ textAlign: 'center', marginTop: '20px' }}>
-              <p className="empty-vault" style={{ marginBottom: '15px' }}>Vault is locked. Decrypt to view bookmarks.</p>
+              <p className="empty-vault" style={{ marginBottom: '15px' }}>Vault is locked.</p>
               <button onClick={unlockVault} className="load-more-btn">Unlock Vault</button>
             </div>
           ) : bookmarks.length === 0 ? (
-            <p className="empty-vault">Vault is secure. No data saved.</p>
+            <p className="empty-vault">No data saved.</p>
           ) : (
             bookmarks.map((b, i) => (
               <div key={i} className="vault-item">
