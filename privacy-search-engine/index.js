@@ -76,47 +76,47 @@ const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
     }
 });
 
-// --- ROUTE 2: DEEP MEDIA SCRAPER (Dependency-Free DDG Engine) ---
+// --- ROUTE 2: DEEP MEDIA SCRAPER (Qwant Privacy Engine) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
     if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        // 1. Silently fetch the DuckDuckGo VQD token using only Axios
-        const tokenRes = await axios.get('https://duckduckgo.com/', { 
-            params: { q: query, t: 'h_' }, 
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-        });
+        // Qwant neatly separates media into 'images' and 'videos' endpoints
+        const endpoint = type === 'videos' ? 'videos' : 'images';
         
-        // 2. Extract token with standard Regex (No extra libraries needed)
-        const vqdMatch = tokenRes.data.match(/vqd=["']?([^"'>\s]+)["']?/);
-        const vqd = vqdMatch ? vqdMatch[1] : null;
-
-        if (!vqd) {
-            console.log("[Media] DDG Token blocked.");
-            return res.json({ results: [] }); // Fails gracefully instead of crashing
-        }
-
-        // 3. Fetch the actual media using the generated token
-        const endpoint = type === 'videos' ? 'https://duckduckgo.com/v.js' : 'https://duckduckgo.com/i.js';
-        const mediaRes = await axios.get(endpoint, {
-            params: { l: 'us-en', o: 'json', q: query, vqd: vqd, f: ',,,', p: '1' },
-            headers: { 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'application/json',
-                'Referer': 'https://duckduckgo.com/'
-            }
+        const response = await axios.get(`https://api.qwant.com/v3/search/${endpoint}`, {
+            params: {
+                q: query,
+                count: 24,
+                locale: 'en_US',
+                safesearch: 1,
+                device: 'desktop'
+            },
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
+            timeout: 10000 // Forces the request to fail gracefully after 10 seconds instead of hanging
         });
 
-        // Send the exact layout format your React frontend expects
-        res.json({ results: mediaRes.data.results || [] });
+        // Extract the array of items from Qwant's JSON structure
+        const items = response.data?.data?.result?.items || [];
+        
+        // Map perfectly to your existing React UI layout
+        const formattedResults = items.map(item => ({
+            image: item.media || item.thumbnail || '',
+            title: item.title || '',
+            url: item.url || '',
+            thumbnail: item.thumbnail || item.media || ''
+        })).filter(item => item.image);
+
+        res.json({ results: formattedResults });
     } catch (error) {
-        console.error("[Media Error]:", error.message);
-        // If DDG times out, return an empty array instead of throwing a 500 Network Error
+        console.error("[Media API Error]:", error.message);
+        // Return an empty array so the frontend stops spinning and recovers gracefully
         res.json({ results: [] }); 
     }
 });
-
 // --- ROUTE 3: ZERO-KNOWLEDGE VAULT ---
 app.post('/vault/sync', async (req, res) => {
     const { userId, encryptedData } = req.body;
