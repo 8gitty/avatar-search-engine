@@ -28,54 +28,66 @@ const connection = { url: 'redis://red-da8r09rtqb8s73f1fp7g:6379' };
 const searchQueue = new Queue('search-queue', { connection });
 const queueEvents = new QueueEvents('search-queue', { connection });
 
+// --- ROUTE 1: WEB SEARCH ROUTE (With Instant Fallback) ---
 app.get('/search', async (req, res) => {
-    const { q } = req.query;
-    if (!q) return res.status(400).json({ error: 'Query parameter q is required' });
+    const { q: query } = req.query;
+    if (!query) return res.status(400).json({ error: 'Search query required' });
 
     try {
-        // 1. Push search job into Redis queue
-        const job = await searchQueue.add('scrape-job', { query: q });
-
-        // 2. Wait for worker process to complete the job
-const unifiedResults = await job.waitUntilFinished(queueEvents, 30000);
-        // 3. Pass results to local hardware-accelerated LLM (Llama 3.2 3B)
-        let aiSummary = null;
+        // 1. Try the Redis Worker first, but ONLY wait 5 seconds (not 30)
+        const job = await searchQueue.add('scrape-job', { query });
+        const unifiedResults = await job.waitUntilFinished(queueEvents, 5000); 
+        
         if (unifiedResults && unifiedResults.length > 0) {
-            try {
-                const context = unifiedResults.slice(0, 3).map(r => r.Text).join(" | ");
-                const prompt = `You are Avatar, an elite private search engine. The user searched for: "${q}". Write a concise, factual 2-sentence summary answering their query using strictly this context: ${context}. Do not use outside knowledge. 
-                CRITICAL RULE: Do not include any introductory phrases like "Here is a summary". Output ONLY the final 2 sentences of the summary.`;
-                // Cloud API Swap (e.g., Mistral AI)
-                const aiRes = await axios.post('https://api.mistral.ai/v1/chat/completions', {
-                    model: 'mistral-small-latest',
-                    messages: [{ role: 'user', content: prompt }],
-                    max_tokens: 150
-                }, {
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${process.env.MISTRAL_API_KEY}` // Stored in Render environment variables
-                    }
-                });
+            return res.json({ results: unifiedResults });
+        }
+    } catch (queueError) {
+        console.log("[Search] Worker busy/offline. Engaging instant fallback...");
+    }
+
+    // 2. Direct Web Fallback (Executes instantly if the worker fails or times out)
+    try {
+        const htmlRes = await axios.get('https://html.duckduckgo.com/html/', {
+            params: { q: query },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+            timeout: 8000
+        });
+
+        const results = [];
+        // Split the raw HTML into individual search result blocks
+        const resultBlocks = htmlRes.data.split('class="result__body"'); 
+        
+        for (let i = 1; i < resultBlocks.length; i++) {
+            const block = resultBlocks[i];
+            
+            // Extract data using standard dependency-free regex
+            const urlMatch = block.match(/<a class="result__url" href="([^"]+)"/);
+            const titleMatch = block.match(/<a class="result__a"[^>]*>([\s\S]*?)<\/a>/);
+            const snippetMatch = block.match(/<a class="result__snippet[^>]*>([\s\S]*?)<\/a>/);
+            
+            if (urlMatch && titleMatch) {
+                let link = urlMatch[1];
+                // Clean up DDG tracking redirects to get the pure URL
+                if (link.includes('uddg=')) {
+                    link = decodeURIComponent(link.split('uddg=')[1].split('&')[0]);
+                }
                 
-                let rawSummary = aiRes.data.choices[0].message.content;
-                aiSummary = rawSummary.replace(/^(Here is a|Here's a|Here is the|Here's the|Summary:|Here is a concise).*?:/gi, '').trim();
-            } catch (aiErr) {
-                console.error("[Avatar Core] Local AI Generation Skipped:", aiErr.message);
+                const title = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+                const snippet = snippetMatch ? snippetMatch[1].replace(/<[^>]+>/g, '').trim() : '';
+                
+                if (link && title) {
+                    results.push({ title, link, snippet });
+                }
             }
         }
 
-        res.json({
-            query: q,
-            aiSummary: aiSummary,
-            results: unifiedResults
-        });
-
-    } catch (err) {
-        console.error('[Avatar Core] Queue processing timed out or failed:', err.message);
-        res.status(500).json({ error: 'Search aggregation failed' });
+        res.json({ results: results.slice(0, 15) }); 
+    } catch (fallbackError) {
+        console.error("[Search Fallback Error]:", fallbackError.message);
+        // Absolute fail-safe: Never throw a 500 error again. Return an empty array.
+        res.json({ results: [] }); 
     }
 });
-
 // --- ROUTE 2: DEEP MEDIA SCRAPER (Multi-Engine Dependency-Free) ---
 app.get('/media', async (req, res) => {
     const { q: query, type } = req.query; 
